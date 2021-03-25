@@ -3,11 +3,12 @@ const redis = require('redis');
 const util = require('util');
 
 const client = redis.createClient();
-client.get = util.promisify(client.get);
+client.hget = util.promisify(client.hget);
 const exec = mongoose.Query.prototype.exec;
 
-mongoose.Query.prototype.cache = function() {
+mongoose.Query.prototype.cache = function(options = {}) {
   this.useCache = true;
+  this.hashKey = JSON.stringify(options.key || '');
   return this;
 }
 
@@ -20,11 +21,11 @@ mongoose.Query.prototype.exec = async function () {
 		collection: this.mongooseCollection.name,
 	});
 	const key = JSON.stringify(queryOptions);
-  const cacheData = await client.get(key);
+  const cacheData = await client.hget(this.hashKey,key);
   if (!cacheData) {
     console.log('NO CACHE DATA YET');
     const modelInstance = await exec.apply(this, arguments);
-    client.set(key, JSON.stringify(modelInstance), 'EX', 10);
+    client.hmset(this.hashKey, key, JSON.stringify(modelInstance), 'EX', 10);
     return modelInstance;
   }
   const doc = JSON.parse(cacheData);
@@ -32,5 +33,10 @@ mongoose.Query.prototype.exec = async function () {
   return Array.isArray(doc)
     ? doc.map((d)=> new this.model(d))
     : new this.model(doc);
-  
+}
+
+module.exports = {
+  clearHash(hashKey) {
+    client.del(JSON.stringify(hashKey));
+  }
 }
